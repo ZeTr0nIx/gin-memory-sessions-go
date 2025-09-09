@@ -1,3 +1,4 @@
+# Example
 ```go
 type Response struct {
 	Count int `json:"count"`
@@ -25,3 +26,4 @@ func main() {
 	router.Run(":8080")
 }
 ```
+
