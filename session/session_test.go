@@ -57,7 +57,7 @@ func TestGoodPath(t *testing.T) {
 	tickerChan <- time.Now()
 	ticker.Stop()
 	close(tickerChan)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Println("Server Shutdown:", err)
 	}
@@ -67,6 +67,9 @@ func TestGoodPath(t *testing.T) {
 		log.Fatalf("%s", err.Error())
 	}
 	assert.Equal(t, values, session.Get("values").([]string))
+
+	session.Delete("values")
+	assert.Nil(t, session.Get("values"))
 }
 
 func TestGC(t *testing.T) {
@@ -115,7 +118,7 @@ func TestGC(t *testing.T) {
 	log.Println("Shutdown Server ...")
 	ticker.Stop()
 	close(tickerChan)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Println("Server Shutdown:", err)
 	}
@@ -128,6 +131,111 @@ func TestGC(t *testing.T) {
 	assert.Equal(t, nilSess, session)
 }
 
+func TestSessionCountOne(t *testing.T) {
+	rw := httptest.NewRecorder()
+	_, router := gin.CreateTestContext(rw)
+	store := NewInMemorySessionStore()
+	tickerChan := make(chan time.Time)
+	ticker := &time.Ticker{
+		C: tickerChan,
+	}
+	sm := NewSessionManager(
+		WithStore(store),
+		WithValidationTicker(ticker),
+	)
+	router.Use(sm.Handle())
+
+	values := []string{"A", "B", "C"}
+
+	router.GET("/values", func(ctx *gin.Context) {
+		sess := GetSession(ctx)
+		sess.Put("values", values)
+		ctx.Writer.Write([]byte("done"))
+	})
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router.Handler(),
+	}
+	go func() {
+		defer log.Println("done")
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+	time.Sleep(2 * time.Second)
+	_, err := http.Get("http://localhost:8080/values")
+	if err != nil {
+		log.Fatalf("%s", err.Error())
+	}
+	time.Sleep(time.Second)
+	tickerChan <- time.Now()
+	log.Println("Shutdown Server ...")
+	ticker.Stop()
+	close(tickerChan)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Println("Server Shutdown:", err)
+	}
+	cancel()
+	assert.Equal(t, 1, len(store.sessions))
+}
+
+func TestSessionCountTwo(t *testing.T) {
+	rw := httptest.NewRecorder()
+	_, router := gin.CreateTestContext(rw)
+	store := NewInMemorySessionStore()
+	tickerChan := make(chan time.Time)
+	ticker := &time.Ticker{
+		C: tickerChan,
+	}
+	sm := NewSessionManager(
+		WithStore(store),
+		WithValidationTicker(ticker),
+	)
+	router.Use(sm.Handle())
+
+	values := []string{"A", "B", "C"}
+
+	router.GET("/values", func(ctx *gin.Context) {
+		sess := GetSession(ctx)
+		sess.Put("values", values)
+		ctx.Writer.Write([]byte("done"))
+	})
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router.Handler(),
+	}
+	go func() {
+		defer log.Println("done")
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+	time.Sleep(2 * time.Second)
+	_, err := http.Get("http://localhost:8080/values")
+	if err != nil {
+		log.Fatalf("%s", err.Error())
+	}
+	_, err = http.Get("http://localhost:8080/values")
+	if err != nil {
+		log.Fatalf("%s", err.Error())
+	}
+	time.Sleep(time.Second)
+	tickerChan <- time.Now()
+	log.Println("Shutdown Server ...")
+	ticker.Stop()
+	close(tickerChan)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Println("Server Shutdown:", err)
+	}
+	cancel()
+	assert.Equal(t, 2, len(store.sessions))
+}
 func TestNewSessionManager(t *testing.T) {
 	type args struct {
 		opts []Option

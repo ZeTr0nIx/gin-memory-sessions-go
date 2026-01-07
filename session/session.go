@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -96,6 +97,14 @@ func newSession() *Session {
 		createdAt:      time.Now(),
 		lastActivityAt: time.Now(),
 	}
+}
+
+func GetGenericValue[T any](session *Session, key string) (T, error) {
+	session.lastActivityAt = time.Now()
+	if session.data[key] != nil {
+		return session.data[key].(T), nil
+	}
+	return *new(T), fmt.Errorf("no value found for key: %s", key)
 }
 
 func (s *Session) Get(key string) any {

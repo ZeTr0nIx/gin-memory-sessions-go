@@ -12,11 +12,13 @@ func main() {
 
 	ep.Handle("GET", "test", func(c *gin.Context) {
 		sess := session.GetSession(c)
+
 		count := 0
 		if countVal := sess.Get("count"); countVal != nil {
 			count = countVal.(int)
 		}
-
+		//or
+		count, _ = session.GetGenericValue[int](sess, "count")
 		count++
 		sess.Put("count", count)
 
