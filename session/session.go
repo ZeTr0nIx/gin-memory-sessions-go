@@ -299,13 +299,11 @@ type sessionContextWriter struct {
 
 func (w *sessionContextWriter) Write(b []byte) (int, error) {
 	writeCookieIfNecessary(w)
-
 	return w.c.Writer.Write(b)
 }
 
 func (w *sessionContextWriter) WriteHeader(code int) {
 	writeCookieIfNecessary(w)
-
 	w.c.Writer.WriteHeader(code)
 }
 

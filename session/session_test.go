@@ -14,6 +14,35 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestConstructerOptions(t *testing.T) {
+	store := NewInMemorySessionStore()
+	tickerChan := make(chan time.Time)
+	ticker := &time.Ticker{
+		C: tickerChan,
+	}
+
+	cookieDomain := "localhost"
+	cookieName := "customCookieName"
+	absExp := time.Second * 2
+	idlExp := time.Second * 2
+
+	sm := NewSessionManager(
+		WithStore(store),
+		WithValidationTicker(ticker),
+		WithCookieDomain(cookieDomain),
+		WithAbsoluteExpiration(absExp),
+		WithCookieName(cookieName),
+		WithIdleExpiration(idlExp),
+	)
+
+	assert.Equal(t, cookieDomain, sm.domain)
+	assert.Equal(t, cookieName, sm.cookieName)
+	assert.Equal(t, absExp, sm.absoluteExpiration)
+	assert.Equal(t, idlExp, sm.idleExpiration)
+	assert.Equal(t, store, sm.store)
+	assert.Equal(t, ticker, sm.validationTicker)
+}
+
 func TestGoodPath(t *testing.T) {
 	rw := httptest.NewRecorder()
 	_, router := gin.CreateTestContext(rw)
