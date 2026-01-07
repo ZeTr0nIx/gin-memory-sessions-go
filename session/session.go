@@ -1,11 +1,12 @@
-// Package sessions contains Classes needed to integrate a memory based session storage for https://github.com/gin-gonic/gin.
+// Package session contains Classes needed to integrate a memory based session storage for https://github.com/gin-gonic/gin.
 // It uses a cookie to store the session name which is used to retrieve the session from the store
-package sessions
+package session
 
 import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -21,6 +22,7 @@ type Session struct {
 	id             string
 	data           map[string]any
 }
+
 type SessionStore interface {
 	read(id string) (*Session, error)
 	write(session *Session) error
@@ -44,7 +46,6 @@ func WithStore(store SessionStore) Option {
 		s.store = store
 	}
 }
-
 func WithIdleExpiration(expiration time.Duration) Option {
 	return func(s *SessionManager) {
 		s.idleExpiration = expiration
@@ -98,6 +99,14 @@ func newSession() *Session {
 	}
 }
 
+func GetGenericValue[T any](session *Session, key string) (T, error) {
+	session.lastActivityAt = time.Now()
+	if session.data[key] != nil {
+		return session.data[key].(T), nil
+	}
+	return *new(T), fmt.Errorf("no value found for key: %s", key)
+}
+
 func (s *Session) Get(key string) any {
 	s.lastActivityAt = time.Now()
 	return s.data[key]
@@ -134,7 +143,10 @@ func NewSessionManager(opts ...Option) *SessionManager {
 
 func (m *SessionManager) gc(t *time.Ticker) {
 	for range t.C {
-		m.store.gc(m.idleExpiration, m.absoluteExpiration)
+		err := m.store.gc(m.idleExpiration, m.absoluteExpiration)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -165,7 +177,6 @@ func (m *SessionManager) start(c *gin.Context) (*Session, *gin.Context) {
 			log.Printf("Failed to read session from store: %v", err)
 		}
 	}
-
 	// Generate a new session
 	if session == nil || !m.validate(session) {
 		session = newSession()
@@ -187,17 +198,6 @@ func (m *SessionManager) save(session *Session) error {
 	return nil
 }
 
-func (m *SessionManager) migrate(session *Session) error {
-	err := m.store.destroy(session.id)
-	if err != nil {
-		return err
-	}
-
-	session.id = generateSessionID()
-
-	return nil
-}
-
 func (m *SessionManager) Handle() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Start the session
@@ -213,14 +213,19 @@ func (m *SessionManager) Handle() gin.HandlerFunc {
 		c.Header("Vary", "Cookie")
 		c.Header("Cache-Control", `no-cache="Set-Cookie"`)
 
-		// Call the next handler and pass the new response writer and new request
-
-		// Save the session
-		m.save(session)
-
 		// Write the session cookie to the response if not already written
 		writeCookieIfNecessary(sw)
+
+		// Call the next handler and pass the new response writer and new request
 		c.Next()
+		err := m.save(session)
+		if err != nil {
+			log.Println(err)
+			errr := c.Error(err)
+			if errr != nil {
+				log.Print(errr.Error())
+			}
+		}
 	}
 }
 
