@@ -112,14 +112,16 @@ func (s *Session) Get(key string) any {
 	if s.data != nil {
 		return s.data[key]
 	}
+	s.data = make(map[string]any)
 	return nil
 }
 
 func (s *Session) Put(key string, value any) {
 	s.lastActivityAt = time.Now()
-	if s.data != nil {
-		s.data[key] = value
+	if s.data == nil {
+		s.data = make(map[string]any)
 	}
+	s.data[key] = value
 }
 
 func (s *Session) Delete(key string) {
