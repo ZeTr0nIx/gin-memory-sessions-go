@@ -109,12 +109,17 @@ func GetGenericValue[T any](session *Session, key string) (T, error) {
 
 func (s *Session) Get(key string) any {
 	s.lastActivityAt = time.Now()
-	return s.data[key]
+	if s.data != nil {
+		return s.data[key]
+	}
+	return nil
 }
 
 func (s *Session) Put(key string, value any) {
 	s.lastActivityAt = time.Now()
-	s.data[key] = value
+	if s.data != nil {
+		s.data[key] = value
+	}
 }
 
 func (s *Session) Delete(key string) {
