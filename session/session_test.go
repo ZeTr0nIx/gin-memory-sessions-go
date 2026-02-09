@@ -123,9 +123,10 @@ func TestGC(t *testing.T) {
 		sess := GetSession(ctx)
 		sessionID = sess.id
 		sess.Put("values", values)
+		log.Println(sess)
 		ctx.Writer.Write([]byte("done"))
 	})
-
+	log.Println(sessionID)
 	srv := &http.Server{
 		Addr:    ":8080",
 		Handler: router.Handler(),
@@ -155,7 +156,7 @@ func TestGC(t *testing.T) {
 	cancel()
 	session, err := store.read(sessionID)
 	if err != nil {
-		log.Fatalf("%s", err.Error())
+		log.Printf("%s", err.Error())
 	}
 	var nilSess *Session
 	assert.Equal(t, nilSess, session)
@@ -209,7 +210,12 @@ func TestSessionCountOne(t *testing.T) {
 		log.Println("Server Shutdown:", err)
 	}
 	cancel()
-	assert.Equal(t, 1, len(store.sessions))
+	count := 0
+	store.sessions.Range(func(key, value any) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 1, count)
 }
 
 func TestSessionCountTwo(t *testing.T) {
@@ -264,7 +270,12 @@ func TestSessionCountTwo(t *testing.T) {
 		log.Println("Server Shutdown:", err)
 	}
 	cancel()
-	assert.Equal(t, 2, len(store.sessions))
+	count := 0
+	store.sessions.Range(func(key, value any) bool {
+		count++
+		return true
+	})
+	assert.Equal(t, 2, count)
 }
 func TestNewSessionManager(t *testing.T) {
 	type args struct {

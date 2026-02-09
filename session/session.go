@@ -234,13 +234,13 @@ func (m *SessionManager) Handle() gin.HandlerFunc {
 
 type InMemorySessionStore struct {
 	mu       sync.RWMutex
-	sessions map[string]*Session
+	sessions *sync.Map
 }
 
 func NewInMemorySessionStore() *InMemorySessionStore {
 	return &InMemorySessionStore{
 		mu:       sync.RWMutex{},
-		sessions: make(map[string]*Session),
+		sessions: &sync.Map{},
 	}
 }
 
@@ -257,15 +257,17 @@ func (s *InMemorySessionStore) read(id string) (*Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	session := s.sessions[id]
-	return session, nil
+	if session, ok := s.sessions.Load(id); ok {
+		return session.(*Session), nil
+	}
+	return nil, fmt.Errorf("error reading session")
 }
 
 func (s *InMemorySessionStore) write(session *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.sessions[session.id] = session
+	s.sessions.Store(session.id, session)
 
 	return nil
 }
@@ -274,7 +276,7 @@ func (s *InMemorySessionStore) destroy(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.sessions, id)
+	s.sessions.Delete(id)
 
 	return nil
 }
@@ -283,13 +285,15 @@ func (s *InMemorySessionStore) gc(idleExpiration, absoluteExpiration time.Durati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for id, session := range s.sessions {
+	s.sessions.Range(func(key, value any) bool {
+		session := value.(*Session)
 		if time.Since(session.lastActivityAt) > idleExpiration ||
 			time.Since(session.createdAt) > absoluteExpiration {
-			delete(s.sessions, id)
+			s.sessions.Delete(key)
+			return false
 		}
-	}
-
+		return true
+	})
 	return nil
 }
 
