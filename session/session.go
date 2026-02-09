@@ -24,7 +24,7 @@ type Session struct {
 }
 
 type SessionStore interface {
-	read(id string) (*Session, error)
+	read(id string) *Session
 	write(session *Session) error
 	destroy(id string) error
 	gc(idleExpiration, absoluteExpiration time.Duration) error
@@ -175,10 +175,7 @@ func (m *SessionManager) start(c *gin.Context) (*Session, *gin.Context) {
 	// Read From Cookie
 	cookie, err := c.Cookie(m.cookieName)
 	if err == nil {
-		session, err = m.store.read(cookie)
-		if err != nil {
-			log.Printf("Failed to read session from store: %v", err)
-		}
+		session = m.store.read(cookie)
 	}
 	// Generate a new session
 	if session == nil || !m.validate(session) {
@@ -253,14 +250,14 @@ func GetSession(c *gin.Context) *Session {
 	return session
 }
 
-func (s *InMemorySessionStore) read(id string) (*Session, error) {
+func (s *InMemorySessionStore) read(id string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if session, ok := s.sessions.Load(id); ok {
-		return session.(*Session), nil
+		return session.(*Session)
 	}
-	return nil, fmt.Errorf("error reading session")
+	return nil
 }
 
 func (s *InMemorySessionStore) write(session *Session) error {

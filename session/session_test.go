@@ -91,10 +91,7 @@ func TestGoodPath(t *testing.T) {
 		log.Println("Server Shutdown:", err)
 	}
 	cancel()
-	session, err := store.read(sessionID)
-	if err != nil {
-		log.Fatalf("%s", err.Error())
-	}
+	session := store.read(sessionID)
 	assert.Equal(t, values, session.Get("values").([]string))
 
 	session.Delete("values")
@@ -154,10 +151,7 @@ func TestGC(t *testing.T) {
 		log.Println("Server Shutdown:", err)
 	}
 	cancel()
-	session, err := store.read(sessionID)
-	if err != nil {
-		log.Printf("%s", err.Error())
-	}
+	session := store.read(sessionID)
 	var nilSess *Session
 	assert.Equal(t, nilSess, session)
 }
