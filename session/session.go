@@ -20,7 +20,7 @@ type Session struct {
 	createdAt      time.Time
 	lastActivityAt time.Time
 	id             string
-	data           map[string]any
+	data           *sync.Map
 }
 
 type SessionStore interface {
@@ -93,7 +93,7 @@ func generateSessionID() string {
 func newSession() *Session {
 	return &Session{
 		id:             generateSessionID(),
-		data:           make(map[string]any),
+		data:           &sync.Map{},
 		createdAt:      time.Now(),
 		lastActivityAt: time.Now(),
 	}
@@ -101,32 +101,28 @@ func newSession() *Session {
 
 func GetGenericValue[T any](session *Session, key string) (T, error) {
 	session.lastActivityAt = time.Now()
-	if session.data[key] != nil {
-		return session.data[key].(T), nil
+	if val, ok := session.data.Load(key); ok {
+		return val.(T), nil
 	}
 	return *new(T), fmt.Errorf("no value found for key: %s", key)
 }
 
 func (s *Session) Get(key string) any {
 	s.lastActivityAt = time.Now()
-	if s.data != nil {
-		return s.data[key]
+	if val, ok := s.data.Load(key); ok {
+		return val
 	}
-	s.data = make(map[string]any)
 	return nil
 }
 
 func (s *Session) Put(key string, value any) {
 	s.lastActivityAt = time.Now()
-	if s.data == nil {
-		s.data = make(map[string]any)
-	}
-	s.data[key] = value
+	s.data.Store(key, value)
 }
 
 func (s *Session) Delete(key string) {
 	s.lastActivityAt = time.Now()
-	delete(s.data, key)
+	s.data.Delete(key)
 }
 
 func NewSessionManager(opts ...Option) *SessionManager {

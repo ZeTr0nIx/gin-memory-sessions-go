@@ -137,7 +137,7 @@ func TestGC(t *testing.T) {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
-	time.Sleep(2 * time.Second)
+	time.Sleep(4 * time.Second)
 	_, err := http.Get("http://localhost:8080/values")
 	if err != nil {
 		log.Fatalf("%s", err.Error())
@@ -148,6 +148,7 @@ func TestGC(t *testing.T) {
 	ticker.Stop()
 	close(tickerChan)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	time.Sleep(5 * time.Second)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Println("Server Shutdown:", err)
 	}
