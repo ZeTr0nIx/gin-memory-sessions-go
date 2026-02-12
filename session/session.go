@@ -17,6 +17,7 @@ import (
 )
 
 type Session struct {
+	mu             sync.RWMutex
 	createdAt      time.Time
 	lastActivityAt time.Time
 	id             string
@@ -100,7 +101,7 @@ func newSession() *Session {
 }
 
 func GetGenericValue[T any](session *Session, key string) (T, error) {
-	session.lastActivityAt = time.Now()
+	session.touch()
 	if val, ok := session.data.Load(key); ok {
 		return val.(T), nil
 	}
@@ -108,7 +109,7 @@ func GetGenericValue[T any](session *Session, key string) (T, error) {
 }
 
 func (s *Session) Get(key string) any {
-	s.lastActivityAt = time.Now()
+	s.touch()
 	if val, ok := s.data.Load(key); ok {
 		return val
 	}
@@ -116,13 +117,26 @@ func (s *Session) Get(key string) any {
 }
 
 func (s *Session) Put(key string, value any) {
-	s.lastActivityAt = time.Now()
+	s.touch()
 	s.data.Store(key, value)
 }
 
 func (s *Session) Delete(key string) {
-	s.lastActivityAt = time.Now()
+	s.touch()
 	s.data.Delete(key)
+}
+
+func (s *Session) touch() {
+	s.mu.Lock()
+	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *Session) getLastActivity() time.Time {
+	s.mu.RLock()
+	t := s.lastActivityAt
+	s.mu.RUnlock()
+	return t
 }
 
 func NewSessionManager(opts ...Option) *SessionManager {
@@ -155,7 +169,7 @@ func (m *SessionManager) gc(t *time.Ticker) {
 
 func (m *SessionManager) validate(session *Session) bool {
 	if time.Since(session.createdAt) > m.absoluteExpiration ||
-		time.Since(session.lastActivityAt) > m.idleExpiration {
+		time.Since(session.getLastActivity()) > m.idleExpiration {
 
 		// Delete the session from the store
 		err := m.store.destroy(session.id)
@@ -188,7 +202,7 @@ func (m *SessionManager) start(c *gin.Context) (*Session, *gin.Context) {
 }
 
 func (m *SessionManager) save(session *Session) error {
-	session.lastActivityAt = time.Now()
+	session.touch()
 
 	err := m.store.write(session)
 	if err != nil {
@@ -251,9 +265,6 @@ func GetSession(c *gin.Context) *Session {
 }
 
 func (s *InMemorySessionStore) read(id string) *Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	if session, ok := s.sessions.Load(id); ok {
 		return session.(*Session)
 	}
@@ -284,7 +295,7 @@ func (s *InMemorySessionStore) gc(idleExpiration, absoluteExpiration time.Durati
 
 	s.sessions.Range(func(key, value any) bool {
 		session := value.(*Session)
-		if time.Since(session.lastActivityAt) > idleExpiration ||
+		if time.Since(session.getLastActivity()) > idleExpiration ||
 			time.Since(session.createdAt) > absoluteExpiration {
 			s.sessions.Delete(key)
 			return false
