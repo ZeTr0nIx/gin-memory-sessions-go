@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +27,6 @@ func TestConstructerOptions(t *testing.T) {
 	cookieName := "customCookieName"
 	absExp := time.Second * 2
 	idlExp := time.Second * 2
-
 	sm := NewSessionManager(
 		WithStore(store),
 		WithValidationTicker(ticker),
@@ -60,11 +60,11 @@ func TestGoodPath(t *testing.T) {
 	router.Use(sm.Handle())
 	sessionID := ""
 	values := []string{"A", "B", "C"}
-	router.GET("/values", func(ctx *gin.Context) {
-		sess := GetSession(ctx)
+	router.GET("/values", func(c *gin.Context) {
+		sess := GetSession(c)
 		sessionID = sess.id
 		sess.Put("values", values)
-		ctx.Writer.Write([]byte("done"))
+		c.Writer.Write([]byte("done"))
 	})
 
 	srv := &http.Server{
@@ -117,7 +117,11 @@ func TestGC(t *testing.T) {
 	router.Use(sm.Handle())
 
 	sessionID := ""
-	values := []string{"A", "B", "C"}
+	values := []string{
+		"A",
+		"B",
+		"C",
+	}
 
 	router.GET("/values", func(ctx *gin.Context) {
 		sess := GetSession(ctx)
@@ -297,4 +301,85 @@ func TestNewSessionManager(t *testing.T) {
 			assert.NotNil(t, got)
 		})
 	}
+}
+
+func TestValidate(t *testing.T) {
+	sm := NewSessionManager()
+	sess := newSession()
+	ok := sm.validate(sess)
+	assert.True(t, ok)
+
+	sess.createdAt = time.Date(2000, 1, 1, 1, 1, 1, 1, time.Local)
+	ok = sm.validate(sess)
+	assert.False(t, ok)
+
+}
+
+func TestFileStore(t *testing.T) {
+	fs := fileStore{
+		fileName: "test_session.json",
+		mu:       sync.RWMutex{},
+	}
+	sess := newSession()
+	sess.data["foo"] = "bar"
+	err := fs.write(sess)
+	assert.NoError(t, err)
+	sess2, err := fs.read(sess.id)
+	assert.NoError(t, err)
+	assert.Equal(t, sess.data, sess2.data)
+	assert.Equal(t, sess.createdAt.UTC(), sess2.createdAt.UTC())
+}
+
+func TestSessionCountTwoWithSessionFile(t *testing.T) {
+	rw := httptest.NewRecorder()
+	_, router := gin.CreateTestContext(rw)
+	store := NewFileStore("test-session.json")
+	tickerChan := make(chan time.Time)
+	ticker := &time.Ticker{
+		C: tickerChan,
+	}
+	sm := NewSessionManager(
+		WithStore(store),
+		WithValidationTicker(ticker),
+	)
+	router.Use(sm.Handle())
+
+	values := []string{"A", "B", "C"}
+
+	router.GET("/values", func(ctx *gin.Context) {
+		sess := GetSession(ctx)
+		sess.Put("values", values)
+		ctx.Writer.Write([]byte("done"))
+	})
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router.Handler(),
+	}
+	go func() {
+		defer log.Println("done")
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+	time.Sleep(2 * time.Second)
+	_, err := http.Get("http://localhost:8080/values")
+	if err != nil {
+		log.Fatalf("%s", err.Error())
+	}
+	_, err = http.Get("http://localhost:8080/values")
+	if err != nil {
+		log.Fatalf("%s", err.Error())
+	}
+	time.Sleep(time.Second)
+	tickerChan <- time.Now()
+	log.Println("Shutdown Server ...")
+	ticker.Stop()
+	close(tickerChan)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Println("Server Shutdown:", err)
+	}
+	cancel()
 }

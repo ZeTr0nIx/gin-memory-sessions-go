@@ -5,11 +5,13 @@ package session
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -40,7 +42,26 @@ type SessionManager struct {
 	domain             string
 }
 
+type sessionContextWriter struct {
+	sessionManager *SessionManager
+	c              *gin.Context
+	done           bool
+	domain         string
+}
+
+type expSession struct {
+	Id             string
+	Data           map[string]any
+	CreatedAt      time.Time
+	LastActivityAt time.Time
+}
 type Option func(*SessionManager)
+
+var logger = func() *log.Logger {
+	logger := log.Default()
+	logger.SetPrefix("[gin-memory-sessions-go]")
+	return logger
+}()
 
 func WithStore(store SessionStore) Option {
 	return func(s *SessionManager) {
@@ -174,7 +195,7 @@ func (m *SessionManager) validate(session *Session) bool {
 		// Delete the session from the store
 		err := m.store.destroy(session.id)
 		if err != nil {
-			panic(err)
+			return false
 		}
 
 		return false
@@ -234,22 +255,136 @@ func (m *SessionManager) Handle() gin.HandlerFunc {
 		c.Next()
 		err := m.save(session)
 		if err != nil {
-			log.Println(err)
+			logger.Println(err)
 			errr := c.Error(err)
 			if errr != nil {
-				log.Print(errr.Error())
+				logger.Print(errr.Error())
 			}
 		}
 	}
 }
 
-type InMemorySessionStore struct {
+type fileStore struct {
+	mu       sync.RWMutex
+	fileName string
+}
+
+// Creates a file to store sessions for testing.
+//
+// Should not be used in production!!!
+func NewFileStore(file string) *fileStore {
+	return &fileStore{
+		mu:       sync.RWMutex{},
+		fileName: file,
+	}
+}
+
+func (f *fileStore) read(id string) (*Session, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	data, err := os.ReadFile(f.fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]any)
+	if len(data) != 0 {
+		err = json.Unmarshal(data, &m)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	data, err = json.Marshal(m[id])
+	if err != nil {
+		return nil, err
+	}
+
+	var expS expSession
+	err = json.Unmarshal(data, &expS)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("%+v", expS)
+	return &Session{
+		id:             expS.Id,
+		createdAt:      expS.CreatedAt,
+		lastActivityAt: expS.LastActivityAt,
+		data:           expS.Data,
+	}, nil
+
+}
+
+func openFile(name string) (*os.File, error) {
+	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_RDONLY, 0660)
+	if err != nil {
+		if os.IsNotExist(err) {
+			file, err = os.Create(name)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	}
+	return file, nil
+}
+
+func (f *fileStore) write(session *Session) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	file, err := openFile(f.fileName)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	data, err := os.ReadFile(f.fileName)
+	if err != nil {
+		return err
+	}
+	m := make(map[string]any)
+	if len(data) != 0 {
+		err = json.Unmarshal(data, &m)
+		if err != nil {
+			return err
+		}
+	}
+
+	m[session.id] = expSession{
+		Id:             session.id,
+		Data:           session.data,
+		CreatedAt:      session.createdAt,
+		LastActivityAt: session.lastActivityAt,
+	}
+
+	data, err = json.Marshal(m)
+	if err != nil {
+		return err
+	}
+
+	_, err = file.Write(data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (f *fileStore) destroy(id string) error {
+	return nil
+}
+func (f *fileStore) gc(idleExpiration, absoluteExpiration time.Duration) error {
+	return nil
+}
+
+type inMemorySessionStore struct {
 	mu       sync.RWMutex
 	sessions *sync.Map
 }
 
-func NewInMemorySessionStore() *InMemorySessionStore {
-	return &InMemorySessionStore{
+func NewInMemorySessionStore() *inMemorySessionStore {
+	return &inMemorySessionStore{
 		mu:       sync.RWMutex{},
 		sessions: &sync.Map{},
 	}
@@ -271,7 +406,7 @@ func (s *InMemorySessionStore) read(id string) *Session {
 	return nil
 }
 
-func (s *InMemorySessionStore) write(session *Session) error {
+func (s *inMemorySessionStore) write(session *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -280,7 +415,7 @@ func (s *InMemorySessionStore) write(session *Session) error {
 	return nil
 }
 
-func (s *InMemorySessionStore) destroy(id string) error {
+func (s *inMemorySessionStore) destroy(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -289,7 +424,7 @@ func (s *InMemorySessionStore) destroy(id string) error {
 	return nil
 }
 
-func (s *InMemorySessionStore) gc(idleExpiration, absoluteExpiration time.Duration) error {
+func (s *inMemorySessionStore) gc(idleExpiration, absoluteExpiration time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -303,13 +438,6 @@ func (s *InMemorySessionStore) gc(idleExpiration, absoluteExpiration time.Durati
 		return true
 	})
 	return nil
-}
-
-type sessionContextWriter struct {
-	sessionManager *SessionManager
-	c              *gin.Context
-	done           bool
-	domain         string
 }
 
 func (w *sessionContextWriter) Write(b []byte) (int, error) {
