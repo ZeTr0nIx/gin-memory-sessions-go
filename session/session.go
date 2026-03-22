@@ -279,57 +279,43 @@ func NewFileStore(file string) *fileStore {
 	}
 }
 
-func (f *fileStore) read(id string) (*Session, error) {
+func (f *fileStore) read(id string) *Session {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
 	data, err := os.ReadFile(f.fileName)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-
 	m := make(map[string]any)
 	if len(data) != 0 {
 		err = json.Unmarshal(data, &m)
 		if err != nil {
-			return nil, err
+			return nil
 		}
 	}
 
 	data, err = json.Marshal(m[id])
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	var expS expSession
 	err = json.Unmarshal(data, &expS)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-
-	log.Printf("%+v", expS)
+	m2 := &sync.Map{}
+	for k, v := range expS.Data {
+		m2.Store(k, v)
+	}
 	return &Session{
 		id:             expS.Id,
 		createdAt:      expS.CreatedAt,
 		lastActivityAt: expS.LastActivityAt,
-		data:           expS.Data,
-	}, nil
-
-}
-
-func openFile(name string) (*os.File, error) {
-	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_RDONLY, 0660)
-	if err != nil {
-		if os.IsNotExist(err) {
-			file, err = os.Create(name)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+		data:           m2,
 	}
-	return file, nil
+
 }
 
 func (f *fileStore) write(session *Session) error {
@@ -353,9 +339,15 @@ func (f *fileStore) write(session *Session) error {
 		}
 	}
 
+	m2 := make(map[string]any)
+	session.data.Range(func(key any, value any) bool {
+		m2[key.(string)] = value
+		return true
+	})
+
 	m[session.id] = expSession{
 		Id:             session.id,
-		Data:           session.data,
+		Data:           m2,
 		CreatedAt:      session.createdAt,
 		LastActivityAt: session.lastActivityAt,
 	}
@@ -399,7 +391,7 @@ func GetSession(c *gin.Context) *Session {
 	return session
 }
 
-func (s *InMemorySessionStore) read(id string) *Session {
+func (s *inMemorySessionStore) read(id string) *Session {
 	if session, ok := s.sessions.Load(id); ok {
 		return session.(*Session)
 	}
@@ -474,4 +466,19 @@ func writeCookieIfNecessary(w *sessionContextWriter) {
 
 	w.c.SetCookie(name, value, maxAge, path, domain, secure, httpOnly)
 	w.done = true
+}
+
+func openFile(name string) (*os.File, error) {
+	file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_RDONLY, 0660)
+	if err != nil {
+		if os.IsNotExist(err) {
+			file, err = os.Create(name)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	}
+	return file, nil
 }

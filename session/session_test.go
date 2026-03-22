@@ -321,12 +321,17 @@ func TestFileStore(t *testing.T) {
 		mu:       sync.RWMutex{},
 	}
 	sess := newSession()
-	sess.data["foo"] = "bar"
+	sess.data.Store("foo", "bar")
 	err := fs.write(sess)
 	assert.NoError(t, err)
-	sess2, err := fs.read(sess.id)
+	sess2 := fs.read(sess.id)
 	assert.NoError(t, err)
-	assert.Equal(t, sess.data, sess2.data)
+	data1, ok := sess.data.Load("foo")
+	assert.True(t, ok)
+	data2, ok := sess2.data.Load("foo")
+	assert.True(t, ok)
+
+	assert.Equal(t, data1, data2)
 	assert.Equal(t, sess.createdAt.UTC(), sess2.createdAt.UTC())
 }
 
